@@ -1,32 +1,53 @@
 <?php
 // ============================================================
-//  Santi Blinds — Database Configuration
-//  Place this file ONE level above your web root (public_html)
-//  for security, OR keep it here and restrict access in .htaccess
+//  Santi Blinds — Admin API bootstrap
+//  Included at the top of every admin/api/*.php endpoint.
 // ============================================================
 
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'santgudy_mydb');
-define('DB_USER', 'santgudy_santi');        // ← change to your phpMyAdmin username
-define('DB_PASS', '@SantiBlinds');            // ← change to your phpMyAdmin password
-define('DB_CHARSET', 'utf8mb4');
-define('MAIL_FROM',         'agapitozyron@gmail.com');   // the Gmail sending the notification
-define('MAIL_TO',           'agapitolearning@gmail.com');   // where you want to receive it
-define('MAIL_APP_PASSWORD', 'kkux dipm clfv kiqg');   // the 16-char App Password
+session_start();
 
-function getDB(): PDO {
-    static $pdo = null;
-    if ($pdo === null) {
-        $dsn = sprintf(
-            'mysql:host=%s;dbname=%s;charset=%s',
-            DB_HOST, DB_NAME, DB_CHARSET
-        );
-        $options = [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false,
-        ];
-        $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+header('Content-Type: application/json');
+header('X-Content-Type-Options: nosniff');
+
+// Lock the admin API to your own site (adjust if your admin panel
+// is served from a different origin than the public site).
+$allowed = 'https://santiblinds.site';
+header('Access-Control-Allow-Origin: ' . $allowed);
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Allow-Credentials: true');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+require_once __DIR__ . '/../../db_config.php';
+
+// ── Auth guard: call at the top of every endpoint except login.php ──
+function requireLogin(): void {
+    if (empty($_SESSION['admin_id'])) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'message' => 'Not authenticated.']);
+        exit;
     }
-    return $pdo;
+}
+
+// ── Audit logger: call after any state-changing action ──
+function logAudit(PDO $pdo, string $action, string $details = ''): void {
+    $stmt = $pdo->prepare(
+        "INSERT INTO audit_log (admin_id, action, details) VALUES (:a, :b, :c)"
+    );
+    $stmt->execute([
+        ':a' => $_SESSION['admin_id'] ?? null,
+        ':b' => $action,
+        ':c' => $details,
+    ]);
+}
+
+// ── Helper: read JSON or form-encoded body ──
+function requestBody(): array {
+    $raw = file_get_contents('php://input');
+    $json = json_decode($raw, true);
+    return is_array($json) ? $json : $_POST;
 }
